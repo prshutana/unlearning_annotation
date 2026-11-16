@@ -1,0 +1,4 @@
+[theme]
+# Less empty space above the first element, so more of each instance fits on screen.
+paddingTop = "2.5rem"
+paddingBottom = "2rem"
