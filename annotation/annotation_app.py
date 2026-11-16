@@ -541,26 +541,33 @@ def build_row(inst, locked: bool) -> dict:
     return row
 
 
-def save_row(inst, locked: bool, message: str, only_if_changed=False) -> bool:
+def save_row(inst, locked: bool, message: str, only_if_changed=False) -> str | None:
+    """Returns "saved", "removed" (all labels and the comment cleared on a draft save,
+    so the instance's row is deleted from the CSV), or None if nothing was written."""
     iid = inst["instance_id"]
     records = st.session_state.records
     row = build_row(inst, locked)
     old = records.get(iid)
+    status = "saved"
     if only_if_changed:
         empty = not any(row[f] for f in LABEL_FIELDS) and not row["comment"]
-        if old is None and empty:
-            return False
-        if old is not None and all(
+        if empty:
+            if old is None:
+                return None
+            records.pop(iid)
+            status, message = "removed", f"Remove {iid}"
+        elif old is not None and all(
             old.get(c, "") == row[c] for c in COLUMNS if c != "last_updated"
         ):
-            return False
-    records[iid] = row
+            return None
+    if status == "saved":
+        records[iid] = row
     try:
         persist(get_storage(), st.session_state.annotator, records, message)
     except Exception as exc:  # keep the edit in session; it is retried on the next save
         st.session_state.flash = ("error", f"Saving failed: {exc}. Your edits are kept in this session.")
-        return False
-    return True
+        return None
+    return status
 
 
 def flash(kind, text):
@@ -577,7 +584,10 @@ def on_navigate(inst, delta, n):
 
 
 def on_save_draft(inst):
-    if save_row(inst, False, f"Draft {inst['instance_id']}", only_if_changed=True):
+    status = save_row(inst, False, f"Draft {inst['instance_id']}", only_if_changed=True)
+    if status == "removed":
+        flash("success", "All labels cleared: this instance was removed from your saved annotations.")
+    elif status == "saved":
         flash("success", "Draft saved.")
     elif "flash" not in st.session_state:
         flash("info", "Nothing new to save.")
