@@ -51,6 +51,9 @@ EPOCH_KEY = "epoch_3"
 ANNOT_DIR = "annotations"
 SHARED_FILE = "shared_annotations.csv"
 DEFAULT_ANNOTATORS = ["Gabriella", "Franzi", "Max", "Ana"]
+# Only this annotator sees the "Reset all annotations" button (override with the
+# `admin` secret).
+DEFAULT_ADMIN = "Ana"
 # The two texts being labelled: (field prefix, title, colour).
 # The colour links each text box to its annotation panels.
 SIDES = [
@@ -616,6 +619,32 @@ def on_merge():
         flash("error", f"Merging failed: {exc}")
 
 
+def reset_all(storage) -> int:
+    """Empties every CSV in storage (all annotators + the merged file), keeping the
+    header row. Overwriting instead of deleting works the same for local and GitHub
+    storage. Returns the number of files reset."""
+    empty = pd.DataFrame(columns=COLUMNS).to_csv(index=False)
+    names = storage.list()
+    for name in names:
+        storage.write(name, empty, "Reset all annotations")
+    return len(names)
+
+
+def on_reset_all():
+    try:
+        count = reset_all(get_storage())
+    except Exception as exc:
+        flash("error", f"Reset failed: {exc}")
+        return
+    st.session_state.records = {}
+    for k in [k for k in st.session_state if str(k).startswith("w::")]:
+        del st.session_state[k]
+    st.session_state.idx = 0
+    st.session_state.pop("export_bytes", None)
+    st.session_state.reset_confirm = False
+    flash("success", f"All annotations were reset ({count} file(s) emptied).")
+
+
 def on_sign_out():
     for k in list(st.session_state.keys()):
         del st.session_state[k]
@@ -700,6 +729,18 @@ def main():
             with st.expander(f"{len(problems)} data file(s) skipped"):
                 for p in problems:
                     st.caption(p)
+        if st.session_state.annotator == get_secret("admin", DEFAULT_ADMIN):
+            st.divider()
+            st.markdown("**Admin**")
+            st.caption(
+                "Empties every annotator's saved annotations and the shared CSV. "
+                "This can't be undone. Anyone else signed in should sign out and back "
+                "in afterwards, or their next save restores their old labels."
+            )
+            confirm = st.checkbox("I understand, reset everything", key="reset_confirm")
+            st.button("Reset all annotations", icon=":material/delete_forever:",
+                      on_click=on_reset_all, disabled=not confirm, type="primary",
+                      use_container_width=True)
         st.button("Sign out", on_click=on_sign_out)
 
     if locked:
